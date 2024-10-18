@@ -9,197 +9,6 @@ from lagent.schema import ModelStatusCode
 from lagent.utils.util import filter_suffix
 
 
-class TritonClient(BaseLLM):
-    """TritonClient is a wrapper of TritonClient for LLM.
-
-    Args:
-        tritonserver_addr (str): the address in format "ip:port" of
-            triton inference server
-        model_name (str): the name of the model
-        session_len (int): the context size
-        max_tokens (int): the expected generated token numbers
-    """
-
-    def __init__(self,
-                 tritonserver_addr: str,
-                 model_name: str,
-                 session_len: int = 32768,
-                 log_level: str = 'WARNING',
-                 **kwargs):
-        super().__init__(path=None, **kwargs)
-        from lmdeploy.serve.turbomind.chatbot import Chatbot, StatusCode
-        self.state_map = {
-            StatusCode.TRITON_STREAM_END: ModelStatusCode.END,
-            StatusCode.TRITON_SERVER_ERR: ModelStatusCode.SERVER_ERR,
-            StatusCode.TRITON_SESSION_CLOSED: ModelStatusCode.SESSION_CLOSED,
-            StatusCode.TRITON_STREAM_ING: ModelStatusCode.STREAM_ING,
-            StatusCode.TRITON_SESSION_OUT_OF_LIMIT:
-            ModelStatusCode.SESSION_OUT_OF_LIMIT,
-            StatusCode.TRITON_SESSION_INVALID_ARG:
-            ModelStatusCode.SESSION_INVALID_ARG,
-            StatusCode.TRITON_SESSION_READY: ModelStatusCode.SESSION_READY
-        }
-        self.chatbot = Chatbot(
-            tritonserver_addr=tritonserver_addr,
-            model_name=model_name,
-            session_len=session_len,
-            log_level=log_level,
-            **kwargs)
-
-    def generate(self,
-                 inputs: Union[str, List[str]],
-                 session_id: int = 2967,
-                 request_id: str = '',
-                 sequence_start: bool = True,
-                 sequence_end: bool = True,
-                 skip_special_tokens: bool = False,
-                 **kwargs):
-        """Start a new round conversation of a session. Return the chat
-        completions in non-stream mode.
-
-        Args:
-            inputs (str, List[str]): user's prompt(s) in this round
-            session_id (int): the identical id of a session
-            request_id (str): the identical id of this round conversation
-            sequence_start (bool): start flag of a session
-            sequence_end (bool): end flag of a session
-            skip_special_tokens (bool): Whether or not to remove special tokens
-                in the decoding. Default to be False.
-        Returns:
-            (a list of/batched) text/chat completion
-        """
-        from lmdeploy.serve.turbomind.chatbot import Session, get_logger
-        if isinstance(inputs, str):
-            inputs = [inputs]
-        prompt = inputs
-
-        assert isinstance(session_id, int), \
-            f'INT session id is required, but got {type(session_id)}'
-
-        self.chatbot.cfg = self._update_gen_params(**kwargs)
-        max_new_tokens = self.chatbot.cfg.max_new_tokens
-
-        logger = get_logger('service.ft', log_level=self.chatbot.log_level)
-        logger.info(f'session {session_id}, request_id {request_id}, '
-                    f'max_out_len {max_new_tokens}')
-
-        if self.chatbot._session is None:
-            sequence_start = True
-            self.chatbot._session = Session(session_id=session_id)
-        elif self.chatbot._session.status == 0:
-            logger.error(f'session {session_id} has been ended. Please set '
-                         f'`sequence_start` be True if you want to restart it')
-            return ''
-
-        self.chatbot._session.status = 1
-        self.chatbot._session.request_id = request_id
-        self.chatbot._session.response = ''
-
-        status, res, _ = None, '', 0
-        for status, res, _ in self.chatbot._stream_infer(
-                self.chatbot._session,
-                prompt,
-                max_new_tokens,
-                sequence_start,
-                sequence_end,
-                skip_special_tokens=skip_special_tokens):
-            status = self.state_map.get(status)
-            if status < ModelStatusCode.END:
-                return ''
-            elif status == ModelStatusCode.END:
-                self.chatbot._session.histories = (
-                    self.chatbot._session.histories +
-                    self.chatbot._session.prompt +
-                    self.chatbot._session.response)
-                # remove stop_words
-                res = filter_suffix(res, self.gen_params.get('stop_words'))
-                return res
-
-    def stream_chat(self,
-                    inputs: List[dict],
-                    session_id: int = 2967,
-                    request_id: str = '',
-                    sequence_start: bool = True,
-                    sequence_end: bool = True,
-                    skip_special_tokens: bool = False,
-                    **kwargs):
-        """Start a new round conversation of a session. Return the chat
-        completions in stream mode.
-
-        Args:
-            session_id (int): the identical id of a session
-            inputs (List[dict]): user's inputs in this round conversation
-            request_id (str): the identical id of this round conversation
-            sequence_start (bool): start flag of a session
-            sequence_end (bool): end flag of a session
-            skip_special_tokens (bool): Whether or not to remove special tokens
-                in the decoding. Default to be False.
-        Returns:
-            tuple(Status, str, int): status, text/chat completion,
-            generated token number
-        """
-        from lmdeploy.serve.turbomind.chatbot import Session, get_logger
-        assert isinstance(session_id, int), \
-            f'INT session id is required, but got {type(session_id)}'
-
-        self.chatbot.cfg = self._update_gen_params(**kwargs)
-        max_new_tokens = self.chatbot.cfg.max_new_tokens
-
-        logger = get_logger('service.ft', log_level=self.chatbot.log_level)
-        logger.info(f'session {session_id}, request_id {request_id}, '
-                    f'max_out_len {max_new_tokens}')
-
-        if self.chatbot._session is None:
-            sequence_start = True
-            self.chatbot._session = Session(session_id=session_id)
-        elif self.chatbot._session.status == 0:
-            logger.error(f'session {session_id} has been ended. Please set '
-                         f'`sequence_start` be True if you want to restart it')
-            return ModelStatusCode.SESSION_CLOSED, '', 0
-
-        self.chatbot._session.status = 1
-        self.chatbot._session.request_id = request_id
-        self.chatbot._session.response = ''
-
-        prompt = self.template_parser(inputs)
-        status, res, _ = None, '', 0
-        for status, res, _ in self.chatbot._stream_infer(
-                self.chatbot._session,
-                prompt,
-                max_new_tokens,
-                sequence_start,
-                sequence_end,
-                skip_special_tokens=skip_special_tokens):
-            status = self.state_map.get(status)
-            # The stop symbol also appears in the output of the last STREAM_ING state.
-            res = filter_suffix(res, self.gen_params.get('stop_words'))
-            if status < ModelStatusCode.END:
-                return status, res, _
-            elif status == ModelStatusCode.END:  # remove stop_words
-                self.chatbot._session.histories = (
-                    self.chatbot._session.histories +
-                    self.chatbot._session.prompt +
-                    self.chatbot._session.response)
-                yield status, res, _
-                break
-            else:
-                yield status, res, _
-
-    def _update_gen_params(self, **kwargs):
-        import mmengine
-        new_gen_params = self.update_gen_params(**kwargs)
-        self.gen_params['stop_words'] = new_gen_params.pop('stop_words')
-        stop_words = self.chatbot._stop_words(
-            self.gen_params.get('stop_words'))
-        cfg = mmengine.Config(
-            dict(
-                session_len=self.chatbot.model.session_len,
-                stop_words=stop_words,
-                bad_words=self.chatbot.cfg.bad_words,
-                **new_gen_params))
-        return cfg
-
-
 class LMDeployPipeline(BaseLLM):
     """
 
@@ -224,27 +33,33 @@ class LMDeployPipeline(BaseLLM):
         pipeline_cfg (dict): config of pipeline
     """
 
-    def __init__(self,
-                 path: str,
-                 model_name: Optional[str] = None,
-                 tp: int = 1,
-                 pipeline_cfg=dict(),
-                 **kwargs):
+    def __init__(
+            self,
+            path: str,
+            model_name: Optional[str] = None,
+            tp: int = 1,
+            pipeline_cfg=dict(),
+            **kwargs,
+    ):
 
         super().__init__(path=path, **kwargs)
         from lmdeploy import TurbomindEngineConfig, pipeline
+
         self.model = pipeline(
             model_path=self.path,
             model_name=model_name,
             backend_config=TurbomindEngineConfig(tp=tp),
-            **pipeline_cfg)
+            **pipeline_cfg,
+        )
 
-    def generate(self,
-                 inputs: Union[str, List[str]],
-                 do_preprocess: bool = None,
-                 skip_special_tokens: bool = False,
-                 return_dict: bool = False,
-                 **kwargs):
+    def generate(
+        self,
+        inputs: Union[str, List[str]],
+        do_preprocess: bool = None,
+        skip_special_tokens: bool = False,
+        return_dict: bool = False,
+        **kwargs,
+    ):
         """Return the chat completions in non-stream mode.
 
         Args:
@@ -306,19 +121,22 @@ class LMDeployServer(BaseLLM):
             [CRITICAL, ERROR, WARNING, INFO, DEBUG]
     """
 
-    def __init__(self,
-                 path: str,
-                 model_name: Optional[str] = None,
-                 server_name: str = '0.0.0.0',
-                 server_port: int = 23333,
-                 tp: int = 1,
-                 log_level: str = 'WARNING',
-                 serve_cfg=dict(),
-                 **kwargs):
+    def __init__(
+            self,
+            path: str,
+            model_name: Optional[str] = None,
+            server_name: str = '0.0.0.0',
+            server_port: int = 23333,
+            tp: int = 1,
+            log_level: str = 'WARNING',
+            serve_cfg=dict(),
+            **kwargs,
+    ):
         super().__init__(path=path, **kwargs)
         self.model_name = model_name
         # TODO get_logger issue in multi processing
         import lmdeploy
+
         self.client = lmdeploy.serve(
             model_path=self.path,
             model_name=model_name,
@@ -326,17 +144,20 @@ class LMDeployServer(BaseLLM):
             server_port=server_port,
             tp=tp,
             log_level=log_level,
-            **serve_cfg)
+            **serve_cfg,
+        )
 
-    def generate(self,
-                 inputs: Union[str, List[str]],
-                 session_id: int = 2967,
-                 sequence_start: bool = True,
-                 sequence_end: bool = True,
-                 ignore_eos: bool = False,
-                 skip_special_tokens: Optional[bool] = False,
-                 timeout: int = 30,
-                 **kwargs) -> List[str]:
+    def generate(
+        self,
+        inputs: Union[str, List[str]],
+        session_id: int = 2967,
+        sequence_start: bool = True,
+        sequence_end: bool = True,
+        ignore_eos: bool = False,
+        skip_special_tokens: Optional[bool] = False,
+        timeout: int = 30,
+        **kwargs,
+    ) -> List[str]:
         """Start a new round conversation of a session. Return the chat
         completions in non-stream mode.
 
@@ -373,7 +194,8 @@ class LMDeployServer(BaseLLM):
                 ignore_eos=ignore_eos,
                 skip_special_tokens=skip_special_tokens,
                 timeout=timeout,
-                **gen_params):
+                **gen_params,
+        ):
             resp = [
                 resp[i] + item['text']
                 for i, item in enumerate(text['choices'])
@@ -384,16 +206,18 @@ class LMDeployServer(BaseLLM):
             return resp[0]
         return resp
 
-    def stream_chat(self,
-                    inputs: List[dict],
-                    session_id=0,
-                    sequence_start: bool = True,
-                    sequence_end: bool = True,
-                    stream: bool = True,
-                    ignore_eos: bool = False,
-                    skip_special_tokens: Optional[bool] = False,
-                    timeout: int = 30,
-                    **kwargs):
+    def stream_chat(
+        self,
+        inputs: List[dict],
+        session_id=0,
+        sequence_start: bool = True,
+        sequence_end: bool = True,
+        stream: bool = True,
+        ignore_eos: bool = False,
+        skip_special_tokens: Optional[bool] = False,
+        timeout: int = 30,
+        **kwargs,
+    ):
         """Start a new round conversation of a session. Return the chat
         completions in stream mode.
 
@@ -429,7 +253,8 @@ class LMDeployServer(BaseLLM):
                 ignore_eos=ignore_eos,
                 skip_special_tokens=skip_special_tokens,
                 timeout=timeout,
-                **gen_params):
+                **gen_params,
+        ):
             resp += text['choices'][0]['text']
             if not resp:
                 continue
@@ -459,6 +284,7 @@ class LMDeployClient(LMDeployServer):
     def __init__(self, url: str, model_name: str, **kwargs):
         BaseLLM.__init__(self, path=url, **kwargs)
         from lmdeploy.serve.openai.api_client import APIClient
+
         self.client = APIClient(url)
         self.model_name = model_name
 
@@ -487,13 +313,15 @@ class AsyncLMDeployPipeline(AsyncLLMMixin, LMDeployPipeline):
         pipeline_cfg (dict): config of pipeline
     """
 
-    async def generate(self,
-                       inputs: Union[str, List[str]],
-                       session_ids: Union[int, List[int]] = None,
-                       do_preprocess: bool = None,
-                       skip_special_tokens: bool = False,
-                       return_dict: bool = False,
-                       **kwargs):
+    async def generate(
+        self,
+        inputs: Union[str, List[str]],
+        session_ids: Union[int, List[int]] = None,
+        do_preprocess: bool = None,
+        skip_special_tokens: bool = False,
+        return_dict: bool = False,
+        **kwargs,
+    ):
         """Return the chat completions in non-stream mode.
 
         Args:
@@ -532,7 +360,8 @@ class AsyncLMDeployPipeline(AsyncLLMMixin, LMDeployPipeline):
                     sequence_start=True,
                     sequence_end=True,
                     do_preprocess=do_preprocess,
-                    **kwargs):
+                    **kwargs,
+            ):
                 resp.text += out.response
                 resp.generate_token_len = out.generate_token_len
                 resp.input_token_len = out.input_token_len
@@ -633,7 +462,8 @@ class AsyncLMDeployServer(AsyncLLMMixin, LMDeployServer):
             ignore_eos=ignore_eos,
             skip_special_tokens=skip_special_tokens,
             timeout=timeout,
-            **gen_params)
+            **gen_params,
+        )
         async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(3 * 3600)) as session:
             async with session.post(
@@ -703,7 +533,8 @@ class AsyncLMDeployServer(AsyncLLMMixin, LMDeployServer):
             ignore_eos=ignore_eos,
             skip_special_tokens=skip_special_tokens,
             timeout=timeout,
-            **gen_params)
+            **gen_params,
+        )
         async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(3 * 3600)) as session:
             async with session.post(
@@ -748,5 +579,6 @@ class AsyncLMDeployClient(AsyncLMDeployServer):
     def __init__(self, url: str, model_name: str, **kwargs):
         BaseLLM.__init__(self, path=url, **kwargs)
         from lmdeploy.serve.openai.api_client import APIClient
+
         self.client = APIClient(url)
         self.model_name = model_name
