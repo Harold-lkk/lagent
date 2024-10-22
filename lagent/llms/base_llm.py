@@ -1,14 +1,18 @@
 from copy import copy
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Union
 
 
 class BaseLLM:
 
-    _backends = {
-        'lmdeploy': LMDeployBackend,
-        'vllm': VLLMBackend,
-        'hf': HFBackend,
-        'http': HTTPBackend,
+    # _backends = {
+    #     'lmdeploy': LMDeployBackend,
+    #     'vllm': VLLMBackend,
+    #     'hf': HFBackend,
+    #     'api': HTTPBackend,
+    # }
+    # default backend config put in backend_config
+    _default_backend_config = {
+        'lmdeploy': {},
     }
 
     _instances: dict = {}
@@ -41,32 +45,16 @@ class BaseLLM:
 
     def __init__(
         self,
-        model_name_or_path: str = None,
+        *,
+        model_path: str = None,
         base_url: str = None,
         api_key: str = None,
         gen_params: dict = None,
         backend: str = None,
         backend_config: dict = None,
-        chat_template: str = None,
     ):
-        self.path = path
-        self.tokenizer_only = tokenizer_only
-        # meta template
-        self.template_parser = template_parser(meta_template)
-        self.eos_token_id = None
-        if meta_template and 'eos_token_id' in meta_template:
-            self.eos_token_id = meta_template['eos_token_id']
 
-        if isinstance(stop_words, str):
-            stop_words = [stop_words]
-        self.gen_params = dict(
-            max_new_tokens=max_new_tokens,
-            top_p=top_p,
-            top_k=top_k,
-            temperature=temperature,
-            repetition_penalty=repetition_penalty,
-            stop_words=stop_words,
-        )
+        pass
 
     def generate(self, inputs: Union[str, List[str]], **gen_params) -> str:
         """Generate results given a str (or list of) inputs.
@@ -240,3 +228,8 @@ class AsyncLLMMixin:
 
 class AsyncBaseLLM(AsyncLLMMixin, BaseLLM):
     pass
+
+
+class InternLM(BaseLLM):
+    base_url = 'https://internlm.com'
+    model_name = 'internlm2-chat'

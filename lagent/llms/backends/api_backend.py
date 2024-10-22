@@ -20,7 +20,7 @@ warnings.simplefilter('default')
 OPENAI_API_BASE = 'https://api.openai.com/v1/chat/completions'
 
 
-class GPTAPI(BaseAPILLM):
+class APILLM(BaseAPILLM):
     """Model wrapper around OpenAI's models.
 
     Args:

@@ -15,6 +15,9 @@ def asdict_completion(output):
     }
 
 
+# vLLM 在 0.6.0 版本之前不支持 chat 接口，因此需要自己实现
+
+
 class VllmModel(BaseLLM):
     """
     A wrapper of vLLM model.
