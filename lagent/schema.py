@@ -61,16 +61,6 @@ class ActionReturn:
 
 
 # need to integrate int, so asdict can convert AgentStatusCode to int
-class ModelStatusCode(IntEnum):
-    END = 0  # end of streaming
-    STREAM_ING = 1  # response is in streaming
-    SERVER_ERR = -1  # triton server's error
-    SESSION_CLOSED = -2  # session has been closed
-    SESSION_OUT_OF_LIMIT = -3  # request length out of limit
-    SESSION_INVALID_ARG = -4  # invalid argument
-    SESSION_READY = 2  # session is ready for inference
-
-
 class AgentStatusCode(IntEnum):
     END = 0  # end of streaming
     STREAM_ING = 1  # response is in streaming

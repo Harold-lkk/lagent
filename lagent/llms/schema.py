@@ -1,7 +1,9 @@
-from typing import TYPE_CHECKING, Annotated, Callable, List, Optional, Union
+from typing import TYPE_CHECKING, Annotated, Callable, List, Optional, Union, Dict, Literal
 
-from pydantic import Field
+from pydantic import Field, BaseModel
 from typing_extensions import NotRequired, TypedDict
+import shortuuid
+import time
 
 if TYPE_CHECKING:
     import torch
@@ -37,3 +39,52 @@ class GenerateParams(TypedDict, total=False):
     spaces_between_special_tokens: bool
     logits_processors: Optional[List[LogitsProcessor]]
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]]
+
+
+class UsageInfo(BaseModel):
+    """Usage information."""
+    prompt_tokens: int = 0
+    total_tokens: int = 0
+    completion_tokens: Optional[int] = 0
+
+
+class ChatCompletionResponseChoice(BaseModel):
+    """Chat completion response choices."""
+    index: int
+    message: List[Dict[str, str]]
+    logprobs = None
+    finish_reason: Optional[Literal['stop', 'length', 'tool_calls']] = None
+
+
+class ChatCompletionResponse(BaseModel):
+    """Chat completion response."""
+    id: str = Field(default_factory=lambda: f'chatcmpl-{shortuuid.random()}')
+    object: str = 'chat.completion'
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    choices: List[ChatCompletionResponseChoice]
+    usage: UsageInfo
+
+
+class DeltaMessage(BaseModel):
+    """Delta messages."""
+    role: Optional[str] = None
+    content: Optional[str] = None
+
+
+class ChatCompletionResponseStreamChoice(BaseModel):
+    """Chat completion response stream choice."""
+    index: int
+    delta: DeltaMessage
+    logprobs = None
+    finish_reason: Optional[Literal['stop', 'length']] = None
+
+
+class ChatCompletionStreamResponse(BaseModel):
+    """Chat completion stream response."""
+    id: str = Field(default_factory=lambda: f'chatcmpl-{shortuuid.random()}')
+    object: str = 'chat.completion.chunk'
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    choices: List[ChatCompletionResponseStreamChoice]
+    usage: Optional[UsageInfo] = None
