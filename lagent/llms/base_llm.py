@@ -1,6 +1,7 @@
 import os
-from typing import List, Union, Dict
-from lagent.llms.backends.base_backend import LocalBackend, RemoteBackend, AsyncMixin
+from typing import Dict, List, Union
+
+from lagent.llms.backends.base_backend import AsyncMixin, LocalBackend, RemoteBackend
 from lagent.llms.backends.lmdeploy_backend import LMDeployBackend
 
 
@@ -11,8 +12,8 @@ class LLM:
             # Add other local backends here
         },
         'remote': {
-        #     'http': HTTPBackend,
-        #     # Add other remote backends here
+            #     'http': HTTPBackend,
+            #     # Add other remote backends here
         },
     }
 
@@ -23,13 +24,24 @@ class LLM:
     # Class-level dictionary to store instances for singleton
     _instances = {}
 
-    def __new__(cls, *, backend, model=None, base_url=None, api_key=None, proxy=None, gen_params=None, backend_config=None, singleton=True):
+    def __new__(cls,
+                *,
+                backend,
+                model=None,
+                base_url=None,
+                api_key=None,
+                proxy=None,
+                gen_params=None,
+                backend_config=None,
+                singleton=True):
         """Control instance creation based on whether singleton is enabled or not."""
         # If singleton is enabled, check if the instance already exists
         if singleton:
             # Create a unique key based on parameters
-            instance_key = (backend, model, base_url, api_key, frozenset(gen_params.items()) if gen_params else None,
-                            frozenset(backend_config.items()) if backend_config else None)
+            instance_key = (
+                backend, model, base_url, api_key,
+                frozenset(gen_params.items()) if gen_params else None,
+                frozenset(backend_config.items()) if backend_config else None)
 
             # Return the cached instance if it exists
             if instance_key in cls._instances:
@@ -43,7 +55,18 @@ class LLM:
             # If singleton is disabled, always create a new instance
             return super().__new__(cls)
 
-    def __init__(self, *, backend, model=None, base_url=None, api_key=None, gen_params=None, backend_config=None, singleton=True, proxy=None, role_map: List[Dict] = None, return_type='str'):
+    def __init__(self,
+                 *,
+                 backend,
+                 model=None,
+                 base_url=None,
+                 api_key=None,
+                 gen_params=None,
+                 backend_config=None,
+                 singleton=True,
+                 proxy=None,
+                 role_map: List[Dict] = None,
+                 return_type='str'):
         """Initialize the appropriate backend based on the backend type."""
         # Avoid re-initialization if already initialized (especially in singleton mode)
         if hasattr(self, 'initialized') and self.initialized:
@@ -55,15 +78,26 @@ class LLM:
         self.model = model or self.model.get(backend)
         self.role_map = role_map
         # Merge backend config with defaults
-        _backend_config = {**self._default_backend_config.get(backend, {}), **(backend_config or {})}
+        _backend_config = {
+            **self._default_backend_config.get(backend, {}),
+            **(backend_config or {})
+        }
 
         # Initialize the backend based on whether it's local or remote
-        self.backend = self._initialize_backend(backend=backend, model=self.model, base_url=self.base_url, api_key=self.api_key, gen_params=gen_params, backend_config=_backend_config)
+        self.backend = self._initialize_backend(
+            backend=backend,
+            model=self.model,
+            base_url=self.base_url,
+            api_key=self.api_key,
+            gen_params=gen_params,
+            backend_config=_backend_config)
 
         # Mark the instance as initialized to prevent reinitialization
         self.initialized = True
 
-    def _initialize_backend(self, backend, model, base_url, api_key, gen_params, backend_config)-> Union[LocalBackend, RemoteBackend]:
+    def _initialize_backend(
+            self, backend, model, base_url, api_key, gen_params,
+            backend_config) -> Union[LocalBackend, RemoteBackend]:
         """Helper function to initialize the backend based on its type."""
         if backend in self._backends['local']:
             return self._backends['local'][backend](
@@ -80,9 +114,12 @@ class LLM:
                 backend_config=backend_config,
             )
         else:
-            raise ValueError(f"Unsupported backend: {backend}. Supported backends: {self._backends.get('local', {}).keys() + self._backends.get('remote', {}).keys()}")
+            raise ValueError(
+                f"Unsupported backend: {backend}. Supported backends: {self._backends.get('local', {}).keys() + self._backends.get('remote', {}).keys()}"
+            )
 
-    def chat_completion(self, inputs: Union[str, List[str]], **gen_params) -> str:
+    def chat_completion(self, inputs: Union[str, List[str]],
+                        **gen_params) -> str:
         """Generate results given a str (or list of) inputs.
 
         Args:
@@ -107,7 +144,8 @@ class LLM:
         if self.backend.whether_support_model(self.model):
             return self.backend.chat_completion(inputs, **gen_params)
         else:
-            return self.backend.completion(self.chat_template(inputs), **gen_params)
+            return self.backend.completion(
+                self.chat_template(inputs), **gen_params)
 
     def completion(self, inputs: str, **gen_params) -> List[str]:
         """Generate results as streaming given a str inputs.
@@ -123,7 +161,9 @@ class LLM:
 
 
 class AsyncLLM(AsyncMixin, LLM):
-    async def chat_completion(self, inputs: Union[str, List[str]], **gen_params) -> str:
+
+    async def chat_completion(self, inputs: Union[str, List[str]],
+                              **gen_params) -> str:
         return await self.backend.chat_completion(inputs, **gen_params)
 
     async def completion(self, inputs: str, **gen_params) -> List[str]:
@@ -150,10 +190,36 @@ class InternLM(LLM):
     chat_template = 'str'
 
 
+class Qwen(LLM):
+    base_url = 'https://puyu.openxlab.org.cn/puyu/api/v1'
+    api_key = os.getenv('INTERNLM_API_KEY')
+
+    model = dict(
+        local='Qwen/Qwen2.5-7B-Instruct',
+        remote='qwen',
+    )
+    _default_backend_config = {
+        'lmdeploy': {
+            'model_name': 'qwen',
+        },
+        'api': {
+            'Content-Type': 'application/json',
+        }
+    }
+
+    chat_template = 'str'
+
+
 if __name__ == '__main__':
 
-    internlm = InternLM(backend='transformers')  # from huggingface
-    internlm = InternLM(backend='transformers', model='custom_path')  # from local 
+    # internlm = InternLM(backend='transformers')  # from huggingface
+    qwen = Qwen(
+        backend='lmdeploy',
+        model='/fs-computility/llm/shared/llm_qwen/Qwen2.5-7B-Instruct'
+    )  # from local
 
-    internlm = InternLM(backend='api', model='internlm2-chat-20b',)  # for puyu offical api
-    internlm = InternLM(backend='api', base_url='localhost:2333', model='internlm2-chat-20b', api_key=os.getenv('custom_key'))  # for proxy server
+    # internlm = InternLM(backend='api', model='internlm2-chat-20b',)  # for puyu official api
+    # internlm = InternLM(backend='api', base_url='localhost:2333', model='internlm2-chat-20b', api_key=os.getenv('custom_key'))  # for proxy server
+    response = qwen.chat_completion([dict(role='user',
+                                          text='hello')])  # chat_completion
+    print(response)

@@ -1,9 +1,9 @@
-from typing import TYPE_CHECKING, Annotated, Callable, List, Optional, Union, Dict, Literal
-
-from pydantic import Field, BaseModel
-from typing_extensions import NotRequired, TypedDict
-import shortuuid
 import time
+from typing import TYPE_CHECKING, Annotated, Callable, Dict, List, Literal, Optional, Union
+
+import shortuuid
+from pydantic import BaseModel, Field
+from typing_extensions import NotRequired, TypedDict
 
 if TYPE_CHECKING:
     import torch
@@ -52,7 +52,7 @@ class ChatCompletionResponseChoice(BaseModel):
     """Chat completion response choices."""
     index: int
     message: List[Dict[str, str]]
-    logprobs = None
+    logprobs: Optional[int] = None
     finish_reason: Optional[Literal['stop', 'length', 'tool_calls']] = None
 
 
@@ -76,7 +76,7 @@ class ChatCompletionResponseStreamChoice(BaseModel):
     """Chat completion response stream choice."""
     index: int
     delta: DeltaMessage
-    logprobs = None
+    logprobs: Optional[int] = None
     finish_reason: Optional[Literal['stop', 'length']] = None
 
 
