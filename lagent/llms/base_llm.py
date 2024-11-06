@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 from lagent.llms.backends.base_backend import AsyncMixin, LocalBackend, RemoteBackend
 from lagent.llms.backends.lmdeploy_backend import LMDeployBackend
@@ -24,16 +24,18 @@ class LLM:
     # Class-level dictionary to store instances for singleton
     _instances = {}
 
-    def __new__(cls,
-                *,
-                backend,
-                model=None,
-                base_url=None,
-                api_key=None,
-                proxy=None,
-                gen_params=None,
-                backend_config=None,
-                singleton=True):
+    def __new__(
+        cls,
+        *,
+        backend: str,
+        model: str,
+        base_url: str,
+        api_key: str,
+        proxies: Dict,
+        gen_params: Dict,
+        backend_config: Dict,
+        singleton: bool,
+    ):
         """Control instance creation based on whether singleton is enabled or not."""
         # If singleton is enabled, check if the instance already exists
         if singleton:
@@ -60,11 +62,11 @@ class LLM:
                  backend,
                  model=None,
                  base_url=None,
-                 api_key=None,
-                 gen_params=None,
-                 backend_config=None,
-                 singleton=True,
-                 proxy=None,
+                 proxies: Optional[Dict] = None,
+                 api_key: Optional[str] = None,
+                 gen_params: Dict = {},
+                 backend_config: Dict = {},
+                 singleton: bool = True,
                  role_map: List[Dict] = None,
                  return_type='str'):
         """Initialize the appropriate backend based on the backend type."""
@@ -117,6 +119,10 @@ class LLM:
             raise ValueError(
                 f"Unsupported backend: {backend}. Supported backends: {self._backends.get('local', {}).keys() + self._backends.get('remote', {}).keys()}"
             )
+
+    def map_message(self, inputs: Union[str, List[str]]) -> List[Dict]:
+        """Map the input message to the required format for the model."""
+        pass
 
     def chat_completion(self, inputs: Union[str, List[str]],
                         **gen_params) -> str:
