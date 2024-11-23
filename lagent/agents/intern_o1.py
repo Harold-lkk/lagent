@@ -159,11 +159,11 @@ class InternThinkerAgent(Agent):
     def forward(self, *message, session_id=0, **kwargs):
         message = self.agent(*message, session_id=session_id, **kwargs).model_copy()
         message.sender = self.name
-        message.content = message.content.replace('<conclude>', '<summary>').replace('</conclude>', '</summary>')
+        message.content = message.content.replace('<conclude>', '<conclude_draft>').replace('</conclude>', '</conclude_draft>')
         for i in range(self.max_turn):
             append = self.agent(AgentMessage(sender=self.agent.name, content='\n\n'), session_id=session_id, **kwargs)
             if i < self.max_turn - 1:
-                append.content = append.content.replace('<conclude>', '<summary>').replace('</conclude>', '</summary>')
+                append.content = append.content.replace('<conclude>', '<conclude_draft>').replace('</conclude>', '</conclude_draft>')
             message.content += '\n\n' + append.content
         return message
 
