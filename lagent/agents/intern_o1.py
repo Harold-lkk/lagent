@@ -187,8 +187,8 @@ class StreamingInternThinkerAgent(StreamingAgent):
 
             inner_message = response_message.model_copy(
                 update=dict(
-                    content=response_message.content.replace('<conclude>', '<summary>').replace(
-                        '</conclude>', '</summary>'
+                    content=response_message.content.replace('<conclude>', '<conclude_draft>').replace(
+                        '</conclude>', '</conclude_draft>'
                     )
                 )
             )
@@ -199,12 +199,16 @@ class StreamingInternThinkerAgent(StreamingAgent):
                 AgentMessage(sender=self.agent.name, content='\n\n'), session_id=session_id, **kwargs
             ):
 
-                inner_message.content = inner_message.content.replace('<conclude>', '<summary>').replace(
-                    '</conclude>', '</summary>'
-                )
+                if i < self.max_turn - 1:
+                    inner_message.content = inner_message.content.replace('<conclude>', '<conclude_draft>').replace(
+                        '</conclude>', '</conclude_draft>'
+                    )
                 yield response_message.model_copy(
                     update=dict(content=response_message.content + '\n\n' + inner_message.content)
                 )
+            response_message = response_message.model_copy(
+                update=dict(content=response_message.content + '\n\n' + inner_message.content)
+            )
         return response_message
 
 
@@ -242,9 +246,13 @@ class AsyncStreamingInternThinkerAgent(AsyncStreamingAgent):
                     inner_message.content = inner_message.content.replace('<conclude>', '<conclude_draft>').replace(
                         '</conclude>', '</conclude_draft>'
                     )
+
                 yield response_message.model_copy(
                     update=dict(content=response_message.content + '\n\n' + inner_message.content)
                 )
+            response_message = response_message.model_copy(
+                update=dict(content=response_message.content + '\n\n' + inner_message.content)
+            )
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Union
 
 import shortuuid
 import uvicorn
@@ -30,6 +30,17 @@ class GenerateRequest(BaseModel):
     skip_special_tokens: Optional[bool] = True
     cancel: Optional[bool] = False  # cancel a responding request
     adapter_name: Optional[str] = Field(default=None, examples=[None])
+    model: Optional[str] = Field(default=None, examples=[None])
+
+
+class GenerateResponse(BaseModel):
+    """Generate response."""
+
+    text: str
+    tokens: int = 0
+    input_tokens: int = 0
+    history_tokens: int = 0
+    finish_reason: Optional[Literal['stop', 'length']] = None
 
 
 app = FastAPI(docs_url='/')
@@ -53,37 +64,37 @@ agent = AsyncStreamingInternThinkerAgent(
 )
 
 
-# 流式生成器函数
-async def stream_response(
-    prompt: str,
-    session_id: int,
-):
-    previous_content = ''  # 存储上一次的内容
-    async for response in agent(prompt, session_id=session_id):
-        current_content = response.content
-        # 找到新增部分
-        incremental_content = current_content[len(previous_content) :]
-        previous_content = current_content
-        if incremental_content:  # 如果有新增部分，才返回
-            yield incremental_content
-
-
 @app.post('/v1/chat/interactive')
-async def chat_interactive_v1(request: Request, generate_request: GenerateRequest):
+async def chat_interactive_v1(request: GenerateRequest, raw_request: Request = None):
+    # 流式生成器函数
+    async def stream_response(
+        prompt: str,
+        session_id: int,
+    ) -> AsyncGenerator[bytes, None]:
+        previous_content = ''  # 存储上一次的内容
+        async for response in agent(prompt, session_id=session_id):
+            current_content = response.content
+            # 找到新增部分
+            incremental_content = current_content[len(previous_content) :]
+            previous_content = current_content
+            if incremental_content:  # 如果有新增部分，才返回
+                chunk = GenerateResponse(
+                    text=incremental_content,
+                )
+                data = chunk.model_dump_json()
+                yield f'{data}\n'
 
-    if not generate_request.interactive_mode:
-        agent.reset(session_id=generate_request.session_id, recursive=True)
+    if not request.interactive_mode:
+        agent.reset(session_id=request.session_id, recursive=True)
         return JSONResponse(content={'message': 'Interactive mode is off.'})
     # 如果是交互模式
-    if isinstance(generate_request.prompt, str):
+    if isinstance(request.prompt, str):
         # 调用代理生成响应
-        return StreamingResponse(
-            stream_response(generate_request.prompt, generate_request.session_id), media_type='text/plain'
-        )
-    elif isinstance(generate_request.prompt, list):
+        return StreamingResponse(stream_response(request.prompt, request.session_id), media_type='text/event-stream')
+    elif isinstance(request.prompt, list):
         # 加载历史上下文
         inputs = {'memory': [], 'agent.memory': []}
-        for p in generate_request.prompt[:-1]:
+        for p in request.prompt[:-1]:
             if p['role'] == 'user':
                 inputs['memory'].append(p)
                 inputs['agent.memory'].append(p)
@@ -93,15 +104,22 @@ async def chat_interactive_v1(request: Request, generate_request: GenerateReques
                     dict(sender=agent.agent.name, content=p['content'].replace('<conclude_draft>', '<conclude>'))
                 )
 
-        agent.load_state_dict(inputs, session_id=generate_request.session_id)
+        agent.load_state_dict(inputs, session_id=request.session_id)
         # 返回最新用户输入的处理结果
         return StreamingResponse(
-            stream_response(generate_request.prompt[-1]['content'], generate_request.session_id),
-            media_type='text/plain',
+            stream_response(request.prompt[-1]['content'], request.session_id),
+            media_type='text/event-stream',
         )
     else:
         raise HTTPException(status_code=400, detail='Invalid prompt format.')
 
 
 if __name__ == '__main__':
-    uvicorn.run(app, host='0.0.0.0', port=39997)
+    uvicorn.run(
+        app,
+        host='0.0.0.0',
+        port=39997,
+        log_level='info',
+        ssl_keyfile=None,
+        ssl_certfile=None,
+    )
