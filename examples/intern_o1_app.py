@@ -1,5 +1,5 @@
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Union
-
+import os
 import shortuuid
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -19,12 +19,12 @@ class GenerateRequest(BaseModel):
     image_url: Optional[Union[str, List[str]]] = Field(default=None, examples=[None])
     session_id: int = -1
     interactive_mode: bool = False
-    stream: bool = False
+    stream: bool = True
     stop: Optional[Union[str, List[str]]] = Field(default=None, examples=[None])
-    request_output_len: Optional[int] = Field(default=None, examples=[None])  # noqa
+    request_output_len: Optional[int] = 8192  # noqa
     top_p: float = 0.8
     top_k: int = 40
-    temperature: float = 0.8
+    temperature: float = 0.7
     repetition_penalty: float = 1.0
     ignore_eos: bool = False
     skip_special_tokens: Optional[bool] = True
@@ -54,11 +54,14 @@ app.add_middleware(
 
 agent = AsyncStreamingInternThinkerAgent(
     llm=AsyncLMDeployClient(
-        url='http://localhost:23333',
-        model_name='qwen_o1',
+        url=os.getenv('MODEL_URL', 'http://localhost:39999'),
+        model_name=os.getenv('MODEL_NAME', 'qwen_o1'),
         meta_template=INTERNLM2_META,
         max_new_tokens=8192,
         stop_words=['<|im_end|>'],
+        temperature=0.7,
+        top_p=0.8,
+        repetition_penalty=1.0
     ),
     template=system_prompt,
 )
