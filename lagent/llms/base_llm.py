@@ -1,143 +1,134 @@
-from copy import copy
-from typing import Dict, List, Optional, Tuple, Union
+import os
+from typing import Dict, List, Optional, Union
+
+from lagent.llms.backends.base_backend import AsyncMixin, LocalBackend, RemoteBackend
+from lagent.llms.backends.lmdeploy_backend import LMDeployBackend
 
 
-class LMTemplateParser:
-    """Intermidate prompt template parser, specifically for language models.
+class LLM:
+    _backends = {
+        'local': {
+            'lmdeploy': LMDeployBackend,
+            # Add other local backends here
+        },
+        'remote': {
+            #     'http': HTTPBackend,
+            #     # Add other remote backends here
+        },
+    }
 
-    Args:
-        meta_template (list of dict, optional): The meta template for the
-            model.
-    """
+    _default_backend_config = {
+        'lmdeploy': {},
+    }
 
-    def __init__(self, meta_template: Optional[List[Dict]] = None):
-        self.meta_template = meta_template
-        if meta_template:
-            assert isinstance(meta_template, list)
-            self.roles: Dict[str, dict] = dict()  # maps role name to config
-            for item in meta_template:
-                assert isinstance(item, dict)
-                assert item['role'] not in self.roles, \
-                    'role in meta prompt must be unique!'
-                self.roles[item['role']] = item.copy()
+    # Class-level dictionary to store instances for singleton
+    _instances = {}
 
-    def __call__(self, dialog) -> str:
-        """Parse a prompt template, and wrap it with meta template if
-        applicable.
+    def __new__(
+        cls,
+        *,
+        backend: str,
+        model: str,
+        base_url: str,
+        api_key: str,
+        proxies: Dict,
+        gen_params: Dict,
+        backend_config: Dict,
+        singleton: bool,
+    ):
+        """Control instance creation based on whether singleton is enabled or not."""
+        # If singleton is enabled, check if the instance already exists
+        if singleton:
+            # Create a unique key based on parameters
+            instance_key = (
+                backend,
+                model,
+                base_url,
+                api_key,
+                frozenset(gen_params.items()) if gen_params else None,
+                frozenset(backend_config.items()) if backend_config else None,
+            )
 
-        Args:
-            dialog (List[str or PromptList]): A prompt
-                template (potentially before being wrapped by meta template).
+            # Return the cached instance if it exists
+            if instance_key in cls._instances:
+                return cls._instances[instance_key]
 
-        Returns:
-            str: The final string.
-        """
-        assert isinstance(dialog, (str, list))
-        if isinstance(dialog, str):
-            return dialog
-        if self.meta_template:
-
-            prompt = ''
-            for index, item in enumerate(dialog):
-                if isinstance(item, str):
-                    prompt += item
-                else:
-                    new_str = self._prompt2str(item, index == len(dialog) - 1)
-                    prompt += new_str
+            # Create a new instance and cache it
+            instance = super().__new__(cls)
+            cls._instances[instance_key] = instance
+            return instance
         else:
-            # in case the model does not have any meta template
-            prompt = ''
-            last_sep = ''
-            for item in dialog:
-                if isinstance(item, str):
-                    if item:
-                        prompt += last_sep + item
-                elif item.get('content', ''):
-                    prompt += last_sep + item.get('prompt', '')
-                last_sep = '\n'
-        return prompt
+            # If singleton is disabled, always create a new instance
+            return super().__new__(cls)
 
-    def _format_begin(self, role_cfg, message):
-        name = message.get('name', None)
-        if name is not None:
-            begin = role_cfg['begin'].get('with_name', '')
-            if name in role_cfg['begin'].get('name', {}):
-                begin = begin.format(name=role_cfg['begin']['name'][name])
-            else:
-                begin = begin.format(name=name)
+    def __init__(
+        self,
+        *,
+        backend,
+        model=None,
+        base_url=None,
+        proxies: Optional[Dict] = None,
+        api_key: Optional[str] = None,
+        gen_params: Dict = {},
+        backend_config: Dict = {},
+        singleton: bool = True,
+        role_map: List[Dict] = None,
+        return_type='str',
+    ):
+        """Initialize the appropriate backend based on the backend type."""
+        # Avoid re-initialization if already initialized (especially in singleton mode)
+        if hasattr(self, 'initialized') and self.initialized:
+            return
+
+        # If no argument is passed, fall back to class-level variables
+        self.base_url = base_url or self.base_url
+        self.api_key = api_key or self.api_key
+        self.model = model or self.model.get(backend)
+        self.role_map = role_map
+        # Merge backend config with defaults
+        _backend_config = {**self._default_backend_config.get(backend, {}), **(backend_config or {})}
+
+        # Initialize the backend based on whether it's local or remote
+        self.backend = self._initialize_backend(
+            backend=backend,
+            model=self.model,
+            base_url=self.base_url,
+            api_key=self.api_key,
+            gen_params=gen_params,
+            backend_config=_backend_config,
+        )
+
+        # Mark the instance as initialized to prevent reinitialization
+        self.initialized = True
+
+    def _initialize_backend(
+        self, backend, model, base_url, api_key, gen_params, backend_config
+    ) -> Union[LocalBackend, RemoteBackend]:
+        """Helper function to initialize the backend based on its type."""
+        if backend in self._backends['local']:
+            return self._backends['local'][backend](
+                model=model,
+                gen_params=gen_params,
+                backend_config=backend_config,
+            )
+        elif backend in self._backends['remote']:
+            return self._backends['remote'][backend](
+                model=model,
+                base_url=base_url,
+                api_key=api_key,
+                gen_params=gen_params,
+                backend_config=backend_config,
+            )
         else:
-            if isinstance(role_cfg.get('begin', ''), str):
-                begin = role_cfg.get('begin', '')
-            elif isinstance(role_cfg['begin'], dict):
-                begin = role_cfg['begin'].get('without_name', '')
-        return begin
+            raise ValueError(
+                f"Unsupported backend: {backend}. Supported backends: {self._backends.get('local', {}).keys() + self._backends.get('remote', {}).keys()}"
+            )
 
-    def _prompt2str(self,
-                    prompt: Union[str, Dict],
-                    last: bool = False) -> Tuple[str, bool]:
-        if isinstance(prompt, str):
-            return prompt
-        merged_prompt = self.roles.get(prompt['role'])
+    def map_message(self, inputs: Union[str, List[str]]) -> List[Dict]:
+        """Map the input message to the required format for the model."""
+        pass
 
-        if merged_prompt.get('fallback_role'):
-            merged_prompt = self.roles.get(merged_prompt['fallback_role'])
-        begin = self._format_begin(merged_prompt, prompt)
-        res = begin
-        if last and merged_prompt.get('generate', False):
-            res += prompt.get('content', '')
-            return res
-        res += prompt.get('content', '') + merged_prompt.get('end', '')
-        if last and merged_prompt['role'] != 'assistant':
-            res += self._format_begin(self.roles['assistant'], {})
-            return res
-        return res
-
-
-class BaseLLM:
-    """Base class for model wrapper.
-
-    Args:
-        path (str): The path to the model.
-        max_new_tokens (int): Maximum length of output expected to be generated by the model. Defaults
-            to 512.
-        tokenizer_only (bool): If True, only the tokenizer will be initialized.
-            Defaults to False.
-        meta_template (list of dict, optional): The model's meta prompt
-            template if needed, in case the requirement of injecting or
-            wrapping of any meta instructions.
-    """
-
-    def __init__(self,
-                 path: str,
-                 tokenizer_only: bool = False,
-                 template_parser: 'LMTemplateParser' = LMTemplateParser,
-                 meta_template: Optional[List[Dict]] = None,
-                 *,
-                 max_new_tokens: int = 512,
-                 top_p: float = 0.8,
-                 top_k: float = 40,
-                 temperature: float = 0.8,
-                 repetition_penalty: float = 1.0,
-                 stop_words: Union[List[str], str] = None):
-        self.path = path
-        self.tokenizer_only = tokenizer_only
-        # meta template
-        self.template_parser = template_parser(meta_template)
-        self.eos_token_id = None
-        if meta_template and 'eos_token_id' in meta_template:
-            self.eos_token_id = meta_template['eos_token_id']
-
-        if isinstance(stop_words, str):
-            stop_words = [stop_words]
-        self.gen_params = dict(
-            max_new_tokens=max_new_tokens,
-            top_p=top_p,
-            top_k=top_k,
-            temperature=temperature,
-            repetition_penalty=repetition_penalty,
-            stop_words=stop_words)
-
-    def generate(self, inputs: Union[str, List[str]], **gen_params) -> str:
+    def chat_completion(self, inputs: Union[str, List[str]], **gen_params) -> str:
         """Generate results given a str (or list of) inputs.
 
         Args:
@@ -157,9 +148,14 @@ class BaseLLM:
                 return response
             return response[0]
         """
-        raise NotImplementedError
+        if self.role_map:
+            inputs = self.map_message(inputs)
+        if self.backend.whether_support_model(self.model):
+            return self.backend.chat_completion(inputs, **gen_params)
+        else:
+            return self.backend.completion(self.chat_template(inputs), **gen_params)
 
-    def stream_generate(self, inputs: str, **gen_params) -> List[str]:
+    def completion(self, inputs: str, **gen_params) -> List[str]:
         """Generate results as streaming given a str inputs.
 
         Args:
@@ -169,137 +165,64 @@ class BaseLLM:
         Returns:
             str: A generated string.
         """
-        raise NotImplementedError
-
-    def chat(self,
-             inputs: Union[List[dict], List[List[dict]]],
-             session_ids: Union[int, List[int]] = None,
-             **gen_params):
-        """Generate completion from a list of templates.
-
-        Args:
-            inputs (Union[List[dict], List[List[dict]]]):
-            gen_params (dict): The input params for generation.
-        Returns:
-        """
-        if isinstance(inputs[0], list):
-            _inputs = list()
-            for msg in inputs:
-                _inputs.append(self.template_parser(msg))
-        else:
-            _inputs = self.template_parser(inputs)
-        return self.generate(_inputs, **gen_params)
-
-    def stream_chat(self, inputs: List[dict], **gen_params):
-        """Generate results as streaming given a list of templates.
-
-        Args:
-            inputs (Union[List[dict]):
-            gen_params (dict): The input params for generation.
-        Returns:
-        """
-        raise NotImplementedError
-
-    def tokenize(self, prompts: Union[str, List[str], List[dict],
-                                      List[List[dict]]]):
-        """Tokenize the input prompts.
-
-        Args:
-            prompts(str | List[str]): user's prompt, or a batch prompts
-
-        Returns:
-            Tuple(numpy.ndarray, numpy.ndarray, numpy.ndarray): prompt's token
-            ids, ids' length and requested output length
-        """
-        raise NotImplementedError
-
-    def update_gen_params(self, **kwargs):
-        gen_params = copy(self.gen_params)
-        gen_params.update(kwargs)
-        return gen_params
+        return self.backend.completion(inputs, **gen_params)
 
 
-class AsyncLLMMixin:
+class AsyncLLM(AsyncMixin, LLM):
 
-    async def generate(self,
-                       inputs: Union[str, List[str]],
-                       session_ids: Union[int, List[int]] = None,
-                       **gen_params) -> str:
-        """Generate results given a str (or list of) inputs.
+    async def chat_completion(self, inputs: Union[str, List[str]], **gen_params) -> str:
+        return await self.backend.chat_completion(inputs, **gen_params)
 
-        Args:
-            inputs (Union[str, List[str]]):
-            gen_params (dict): The input params for generation.
-
-        Returns:
-            Union[str, List[str]]: A (list of) generated strings.
-
-        eg.
-            batched = True
-            if isinstance(inputs, str):
-                inputs = [inputs]
-                batched = False
-            response = ['']
-            if batched:
-                return response
-            return response[0]
-        """
-        raise NotImplementedError
-
-    async def stream_generate(self, inputs: str, **gen_params) -> List[str]:
-        """Generate results as streaming given a str inputs.
-
-        Args:
-            inputs (str):
-            gen_params (dict): The input params for generation.
-
-        Returns:
-            str: A generated string.
-        """
-        raise NotImplementedError
-
-    async def chat(self,
-                   inputs: Union[List[dict], List[List[dict]]],
-                   session_ids: Union[int, List[int]] = None,
-                   **gen_params):
-        """Generate completion from a list of templates.
-
-        Args:
-            inputs (Union[List[dict], List[List[dict]]]):
-            gen_params (dict): The input params for generation.
-        Returns:
-        """
-        if isinstance(inputs[0], list):
-            _inputs = list()
-            for msg in inputs:
-                _inputs.append(self.template_parser(msg))
-        else:
-            _inputs = self.template_parser(inputs)
-        return await self.generate(_inputs, session_ids, **gen_params)
-
-    async def stream_chat(self, inputs: List[dict], **gen_params):
-        """Generate results as streaming given a list of templates.
-
-        Args:
-            inputs (Union[List[dict]):
-            gen_params (dict): The input params for generation.
-        Returns:
-        """
-        raise NotImplementedError
-
-    async def tokenize(self, prompts: Union[str, List[str], List[dict],
-                                            List[List[dict]]]):
-        """Tokenize the input prompts.
-
-        Args:
-            prompts(str | List[str]): user's prompt, or a batch prompts
-
-        Returns:
-            Tuple(numpy.ndarray, numpy.ndarray, numpy.ndarray): prompt's token
-            ids, ids' length and requested output length
-        """
-        raise NotImplementedError
+    async def completion(self, inputs: str, **gen_params) -> List[str]:
+        return await self.backend.completion(inputs, **gen_params)
 
 
-class AsyncBaseLLM(AsyncLLMMixin, BaseLLM):
-    pass
+class InternLM(LLM):
+    base_url = 'https://puyu.openxlab.org.cn/puyu/api/v1'
+    api_key = os.getenv('INTERNLM_API_KEY')
+
+    model = dict(
+        local='internlm/internlm-chat-7b',
+        remote='internlm2-chat-7b',
+    )
+    _default_backend_config = {
+        'lmdeploy': {
+            'model_name': 'internlm2-chat',
+        },
+        'api': {
+            'Content-Type': 'application/json',
+        },
+    }
+
+    chat_template = 'str'
+
+
+class Qwen(LLM):
+    base_url = 'https://puyu.openxlab.org.cn/puyu/api/v1'
+    api_key = os.getenv('INTERNLM_API_KEY')
+
+    model = dict(
+        local='Qwen/Qwen2.5-7B-Instruct',
+        remote='qwen',
+    )
+    _default_backend_config = {
+        'lmdeploy': {
+            'model_name': 'qwen',
+        },
+        'api': {
+            'Content-Type': 'application/json',
+        },
+    }
+
+    chat_template = 'str'
+
+
+if __name__ == '__main__':
+
+    # internlm = InternLM(backend='transformers')  # from huggingface
+    qwen = Qwen(backend='lmdeploy', model='/fs-computility/llm/shared/llm_qwen/Qwen2.5-7B-Instruct')  # from local
+
+    # internlm = InternLM(backend='api', model='internlm2-chat-20b',)  # for puyu official api
+    # internlm = InternLM(backend='api', base_url='localhost:2333', model='internlm2-chat-20b', api_key=os.getenv('custom_key'))  # for proxy server
+    response = qwen.chat_completion([dict(role='user', text='hello')])  # chat_completion
+    print(response)

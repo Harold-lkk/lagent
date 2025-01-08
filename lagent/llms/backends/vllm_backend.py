@@ -8,11 +8,11 @@ from lagent.utils.util import filter_suffix
 def asdict_completion(output):
     return {
         key: getattr(output, key)
-        for key in [
-            'text', 'token_ids', 'cumulative_logprob', 'logprobs',
-            'finish_reason', 'stop_reason'
-        ]
+        for key in ['text', 'token_ids', 'cumulative_logprob', 'logprobs', 'finish_reason', 'stop_reason']
     }
+
+
+# vLLM 在 0.6.0 版本之前不支持 chat 接口，因此需要自己实现
 
 
 class VllmModel(BaseLLM):
@@ -35,18 +35,17 @@ class VllmModel(BaseLLM):
 
         super().__init__(path=path, **kwargs)
         from vllm import LLM
-        self.model = LLM(
-            model=self.path,
-            trust_remote_code=True,
-            tensor_parallel_size=tp,
-            **vllm_cfg)
 
-    def generate(self,
-                 inputs: Union[str, List[str]],
-                 do_preprocess: bool = None,
-                 skip_special_tokens: bool = False,
-                 return_dict: bool = False,
-                 **kwargs):
+        self.model = LLM(model=self.path, trust_remote_code=True, tensor_parallel_size=tp, **vllm_cfg)
+
+    def generate(
+        self,
+        inputs: Union[str, List[str]],
+        do_preprocess: bool = None,
+        skip_special_tokens: bool = False,
+        return_dict: bool = False,
+        **kwargs
+    ):
         """Return the chat completions in non-stream mode.
 
         Args:
@@ -70,10 +69,8 @@ class VllmModel(BaseLLM):
         stop_words = gen_params.pop('stop_words')
 
         sampling_config = SamplingParams(
-            skip_special_tokens=skip_special_tokens,
-            max_tokens=max_new_tokens,
-            stop=stop_words,
-            **gen_params)
+            skip_special_tokens=skip_special_tokens, max_tokens=max_new_tokens, stop=stop_words, **gen_params
+        )
         response = self.model.generate(prompt, sampling_params=sampling_config)
         texts = [resp.outputs[0].text for resp in response]
         # remove stop_words
@@ -81,10 +78,8 @@ class VllmModel(BaseLLM):
         for resp, text in zip(response, texts):
             resp.outputs[0].text = text
         if batched:
-            return [asdict_completion(resp.outputs[0])
-                    for resp in response] if return_dict else texts
-        return asdict_completion(
-            response[0].outputs[0]) if return_dict else texts[0]
+            return [asdict_completion(resp.outputs[0]) for resp in response] if return_dict else texts
+        return asdict_completion(response[0].outputs[0]) if return_dict else texts[0]
 
 
 class AsyncVllmModel(AsyncBaseLLM):
@@ -107,20 +102,18 @@ class AsyncVllmModel(AsyncBaseLLM):
         super().__init__(path=path, **kwargs)
         from vllm import AsyncEngineArgs, AsyncLLMEngine
 
-        engine_args = AsyncEngineArgs(
-            model=self.path,
-            trust_remote_code=True,
-            tensor_parallel_size=tp,
-            **vllm_cfg)
+        engine_args = AsyncEngineArgs(model=self.path, trust_remote_code=True, tensor_parallel_size=tp, **vllm_cfg)
         self.model = AsyncLLMEngine.from_engine_args(engine_args)
 
-    async def generate(self,
-                       inputs: Union[str, List[str]],
-                       session_ids: Union[int, List[int]] = None,
-                       do_preprocess: bool = None,
-                       skip_special_tokens: bool = False,
-                       return_dict: bool = False,
-                       **kwargs):
+    async def generate(
+        self,
+        inputs: Union[str, List[str]],
+        session_ids: Union[int, List[int]] = None,
+        do_preprocess: bool = None,
+        skip_special_tokens: bool = False,
+        return_dict: bool = False,
+        **kwargs
+    ):
         """Return the chat completions in non-stream mode.
 
         Args:
@@ -150,27 +143,21 @@ class AsyncVllmModel(AsyncBaseLLM):
         stop_words = gen_params.pop('stop_words')
 
         sampling_config = SamplingParams(
-            skip_special_tokens=skip_special_tokens,
-            max_tokens=max_new_tokens,
-            stop=stop_words,
-            **gen_params)
+            skip_special_tokens=skip_special_tokens, max_tokens=max_new_tokens, stop=stop_words, **gen_params
+        )
 
         async def _inner_generate(uid, text):
-            resp, generator = '', self.model.generate(
-                text, sampling_params=sampling_config, request_id=uid)
+            resp, generator = '', self.model.generate(text, sampling_params=sampling_config, request_id=uid)
             async for out in generator:
                 resp = out.outputs[0]
             return resp
 
-        response = await asyncio.gather(*[
-            _inner_generate(sid, inp) for sid, inp in zip(session_ids, prompt)
-        ])
+        response = await asyncio.gather(*[_inner_generate(sid, inp) for sid, inp in zip(session_ids, prompt)])
         texts = [resp.text for resp in response]
         # remove stop_words
         texts = filter_suffix(texts, self.gen_params.get('stop_words'))
         for resp, text in zip(response, texts):
             resp.text = text
         if batched:
-            return [asdict_completion(resp)
-                    for resp in response] if return_dict else texts
+            return [asdict_completion(resp) for resp in response] if return_dict else texts
         return asdict_completion(response[0]) if return_dict else texts[0]
