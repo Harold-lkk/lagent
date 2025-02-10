@@ -11,13 +11,11 @@ class LocalBackend:
         model,
         backend_config: dict = None,
         gen_params: dict = None,
-        chat_template: str = None,
     ) -> None:
 
         self.model = model
         self.gen_params = gen_params
         self.backend_config = backend_config
-        self.chat_template = chat_template
         self.client = self.init_client(model, backend_config, gen_params)
 
     def init_client(self, model, gen_params, backend_config) -> Callable:
@@ -106,9 +104,6 @@ class LocalBackend:
         gen_params.update(gen_params)
         gen_params = self.generate_params_map(gen_params)
         return gen_params
-
-    def whether_support_model(self, model_name):
-        raise NotImplementedError()
 
     def response_to_chat_completion_response(self, response):
         raise NotImplementedError()

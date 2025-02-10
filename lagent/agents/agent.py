@@ -137,9 +137,12 @@ class Agent:
                     obj.memory.create_instance(session_id)
                 obj.memory.memory_map[session_id].load(state_dict[key] or [])
 
-    def register_hook(self, hook: Callable):
+    def register_hook(self, hook: Callable, recursive: bool = False) -> RemovableHandle:
         handle = RemovableHandle(self._hooks)
         self._hooks[handle.id] = hook
+        if recursive:
+            for agent in getattr(self, '_agents', {}).values():
+                agent.register_hook(handle, recursive=True)
         return handle
 
     def reset(self, session_id=0, keypath: Optional[str] = None, recursive: bool = False):
@@ -223,7 +226,7 @@ class StreamingAgentMixin:
             if result:
                 message = result
         self.update_memory(message, session_id=session_id)
-        response_message = AgentMessage(sender=self.name, content="")
+        response_message = AgentMessage(sender=self.name, content='')
         for response_message in self.forward(*message, session_id=session_id, **kwargs):
             if not isinstance(response_message, AgentMessage):
                 model_state, response = response_message
@@ -266,7 +269,7 @@ class AsyncStreamingAgentMixin:
             if result:
                 message = result
         self.update_memory(message, session_id=session_id)
-        response_message = AgentMessage(sender=self.name, content="")
+        response_message = AgentMessage(sender=self.name, content='')
         async for response_message in self.forward(*message, session_id=session_id, **kwargs):
             if not isinstance(response_message, AgentMessage):
                 model_state, response = response_message

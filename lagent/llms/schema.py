@@ -41,56 +41,56 @@ class GenerateParams(TypedDict, total=False):
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]]
 
 
-class UsageInfo(BaseModel):
-    """Usage information."""
+# class UsageInfo(BaseModel):
+#     """Usage information."""
 
-    prompt_tokens: int = 0
-    total_tokens: int = 0
-    completion_tokens: Optional[int] = 0
-
-
-class ChatCompletionResponseChoice(BaseModel):
-    """Chat completion response choices."""
-
-    index: int
-    message: List[Dict[str, str]]
-    logprobs: Optional[int] = None
-    finish_reason: Optional[Literal['stop', 'length', 'tool_calls']] = None
+#     prompt_tokens: int = 0
+#     total_tokens: int = 0
+#     completion_tokens: Optional[int] = 0
 
 
-class ChatCompletionResponse(BaseModel):
-    """Chat completion response."""
+# class ChatCompletionResponseChoice(BaseModel):
+#     """Chat completion response choices."""
 
-    id: str = Field(default_factory=lambda: f'chatcmpl-{shortuuid.random()}')
-    object: str = 'chat.completion'
-    created: int = Field(default_factory=lambda: int(time.time()))
-    model: str
-    choices: List[ChatCompletionResponseChoice]
-    usage: UsageInfo
+#     index: int
+#     message: List[Dict[str, str]]
+#     logprobs: Optional[int] = None
+#     finish_reason: Optional[Literal['stop', 'length', 'tool_calls']] = None
 
 
-class DeltaMessage(BaseModel):
-    """Delta messages."""
+# class ChatCompletionResponse(BaseModel):
+#     """Chat completion response."""
 
-    role: Optional[str] = None
-    content: Optional[str] = None
-
-
-class ChatCompletionResponseStreamChoice(BaseModel):
-    """Chat completion response stream choice."""
-
-    index: int
-    delta: DeltaMessage
-    logprobs: Optional[int] = None
-    finish_reason: Optional[Literal['stop', 'length']] = None
+#     id: str = Field(default_factory=lambda: f'chatcmpl-{shortuuid.random()}')
+#     object: str = 'chat.completion'
+#     created: int = Field(default_factory=lambda: int(time.time()))
+#     model: str
+#     choices: List[ChatCompletionResponseChoice]
+#     usage: UsageInfo
 
 
-class ChatCompletionStreamResponse(BaseModel):
-    """Chat completion stream response."""
+# class DeltaMessage(BaseModel):
+#     """Delta messages."""
 
-    id: str = Field(default_factory=lambda: f'chatcmpl-{shortuuid.random()}')
-    object: str = 'chat.completion.chunk'
-    created: int = Field(default_factory=lambda: int(time.time()))
-    model: str
-    choices: List[ChatCompletionResponseStreamChoice]
-    usage: Optional[UsageInfo] = None
+#     role: Optional[str] = None
+#     content: Optional[str] = None
+
+
+# class ChatCompletionResponseStreamChoice(BaseModel):
+#     """Chat completion response stream choice."""
+
+#     index: int
+#     delta: DeltaMessage
+#     logprobs: Optional[int] = None
+#     finish_reason: Optional[Literal['stop', 'length']] = None
+
+
+# class ChatCompletionStreamResponse(BaseModel):
+#     """Chat completion stream response."""
+
+#     id: str = Field(default_factory=lambda: f'chatcmpl-{shortuuid.random()}')
+#     object: str = 'chat.completion.chunk'
+#     created: int = Field(default_factory=lambda: int(time.time()))
+#     model: str
+#     choices: List[ChatCompletionResponseStreamChoice]
+#     usage: Optional[UsageInfo] = None

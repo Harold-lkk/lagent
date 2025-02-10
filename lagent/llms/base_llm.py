@@ -2,25 +2,35 @@ import os
 from typing import Dict, List, Optional, Union
 
 from lagent.llms.backends.base_backend import AsyncMixin, LocalBackend, RemoteBackend
-from lagent.llms.backends.lmdeploy_backend import LMDeployBackend
+from lagent.llms.backends.lmdeploy_backend import LMDeployBackend, LMDeployBackendConfig
+from lagent.llms.schema import GenerateParams
 
 
 class LLM:
     _backends = {
         'local': {
-            'lmdeploy': LMDeployBackend,
-            # Add other local backends here
+            'lmdeploy': dict(
+                type=LMDeployBackend,
+                backend_config=LMDeployBackendConfig(),
+                gen_params=GenerateParams(),
+            ),
+            'vllm': dict(
+                type=LocalBackend,
+                backend_config=dict(),
+                gen_params=GenerateParams(),
+            ),
+            'sglang': dict(
+                type=LocalBackend,
+                backend_config=dict(),
+                gen_params=GenerateParams(),
+            ),
         },
         'remote': {
             #     'http': HTTPBackend,
             #     # Add other remote backends here
         },
     }
-
-    _default_backend_config = {
-        'lmdeploy': {},
-    }
-
+    chat_template = """"""
     # Class-level dictionary to store instances for singleton
     _instances = {}
 
@@ -69,7 +79,7 @@ class LLM:
         base_url=None,
         proxies: Optional[Dict] = None,
         api_key: Optional[str] = None,
-        gen_params: Dict = {},
+        gen_params: GenerateParams = GenerateParams(),
         backend_config: Dict = {},
         singleton: bool = True,
         role_map: List[Dict] = None,
@@ -86,7 +96,6 @@ class LLM:
         self.model = model or self.model.get(backend)
         self.role_map = role_map
         # Merge backend config with defaults
-        _backend_config = {**self._default_backend_config.get(backend, {}), **(backend_config or {})}
 
         # Initialize the backend based on whether it's local or remote
         self.backend = self._initialize_backend(
@@ -95,7 +104,7 @@ class LLM:
             base_url=self.base_url,
             api_key=self.api_key,
             gen_params=gen_params,
-            backend_config=_backend_config,
+            backend_config=backend_config,
         )
 
         # Mark the instance as initialized to prevent reinitialization
@@ -106,18 +115,19 @@ class LLM:
     ) -> Union[LocalBackend, RemoteBackend]:
         """Helper function to initialize the backend based on its type."""
         if backend in self._backends['local']:
-            return self._backends['local'][backend](
+            return self._backends['local'][backend]['type'](
                 model=model,
-                gen_params=gen_params,
-                backend_config=backend_config,
+                gen_params=gen_params.update(self._backends['local'][backend]['gen_params']),
+                backend_config=backend_config.update(self._backends['local'][backend]['backend_config']),
+                chat_template=self.chat_template,
             )
         elif backend in self._backends['remote']:
             return self._backends['remote'][backend](
                 model=model,
                 base_url=base_url,
                 api_key=api_key,
-                gen_params=gen_params,
-                backend_config=backend_config,
+                gen_params=gen_params.update(self._backends['remote'][backend]['gen_params']),
+                backend_config=backend_config.update(self._backends['remote'][backend]['backend_config']),
             )
         else:
             raise ValueError(
@@ -150,10 +160,7 @@ class LLM:
         """
         if self.role_map:
             inputs = self.map_message(inputs)
-        if self.backend.whether_support_model(self.model):
-            return self.backend.chat_completion(inputs, **gen_params)
-        else:
-            return self.backend.completion(self.chat_template(inputs), **gen_params)
+        return self.backend.chat_completion(inputs, **gen_params)
 
     def completion(self, inputs: str, **gen_params) -> List[str]:
         """Generate results as streaming given a str inputs.
@@ -165,7 +172,11 @@ class LLM:
         Returns:
             str: A generated string.
         """
+
         return self.backend.completion(inputs, **gen_params)
+
+    def function_call(self, inputs: Union[str, List[str]], **gen_params) -> str:
+        pass
 
 
 class AsyncLLM(AsyncMixin, LLM):
@@ -220,7 +231,7 @@ class Qwen(LLM):
 if __name__ == '__main__':
 
     # internlm = InternLM(backend='transformers')  # from huggingface
-    qwen = Qwen(backend='lmdeploy', model='/fs-computility/llm/shared/llm_qwen/Qwen2.5-7B-Instruct')  # from local
+    qwen = Qwen(backend='lmdeploy', model='/fs-computility/llm/shared/llm_qwen/Qwen2.5-0.5B-Instruct')  # from local
 
     # internlm = InternLM(backend='api', model='internlm2-chat-20b',)  # for puyu official api
     # internlm = InternLM(backend='api', base_url='localhost:2333', model='internlm2-chat-20b', api_key=os.getenv('custom_key'))  # for proxy server
